@@ -27,16 +27,28 @@
 
 PICA 为 B 端商户提供两种并行的登录方式：
 
-| 登录方式         | 适用场景                        | 优势                        |
-| ---------------- | ------------------------------- | --------------------------- |
-| **Google OAuth** | 办公室环境、Chrome 浏览器       | 0.5秒快速登录，无需输入密码 |
-| **Email OTP**    | 出差、Safari、Google 服务不稳定 | 不依赖第三方服务，仅需邮箱  |
+| 登录方式         | 适用场景                        | 优势                       |
+| ---------------- | ------------------------------- | -------------------------- |
+| **Google OAuth** | 办公室环境、Chrome 浏览器       | 一键登录，安全便捷         |
+| **Email OTP**    | 出差、Safari、Google 服务不稳定 | 不依赖第三方服务，仅需邮箱 |
 
 **核心设计原则**：
 - 两种方式关联到**同一个账户**（以 Email 为唯一标识）
 - 两种方式使用**同一个加密密钥**（HKDF(email + user_salt)）
 - 两种方式恢复**同一个钱包地址**
 - 登录成功后的**权限完全一致**
+- **智能账号绑定**：通过邮箱注册的用户可自动绑定 Google 账号，实现无缝快速登录
+
+**Google OAuth 安全配置**：
+- ✅ 使用 `prompt=select_account` 参数，每次登录都需要用户在 Google 页面确认
+- ✅ 防止静默登录，避免误操作
+- ✅ 用户需主动选择账号并点击"继续"按钮
+- ❌ 不需要额外的 PIN 验证（Google 确认页已提供足够安全保障）
+
+**Email PIN 快捷登录**：
+- ✅ 老设备使用 PIN 代替 OTP（省成本，快速）
+- ✅ 新设备强制设置 PIN（为下次快捷登录做准备）
+- ✅ 忘记 PIN 可通过 OTP 重置
 
 ### 1.2 Email 作为"身份锚点"
 
@@ -264,7 +276,7 @@ sequenceDiagram
 │                                 │
 │  忘记 PIN 可通过邮箱/Google 重新登录 │
 │                                 │
-│  [设置 PIN] [暂不设置]          │
+│  [设置 PIN]                     │
 └─────────────────────────────────┘
 ```
 
@@ -411,7 +423,7 @@ sequenceDiagram
 │                                 │
 │  请为此设备设置新的操作密码       │
 │                                 │
-│  [设置 PIN] [暂不设置]          │
+│  [设置 PIN]                     │
 └─────────────────────────────────┘
 ```
 
@@ -424,7 +436,7 @@ sequenceDiagram
 
 ### 4.4 忘记 PIN 的处理
 
-**场景**：用户在老设备输入 PIN 错误 5 次
+**场景**:用户在老设备输入 PIN 错误 5 次
 
 ```
 ┌─────────────────────────────────┐
@@ -432,27 +444,226 @@ sequenceDiagram
 │                                 │
 │  连续输入错误 5 次，已锁定       │
 │                                 │
-│  你可以通过以下方式重新获得访问：│
+│  你可以通过以下方式重新获得访问:│
 │                                 │
 │  [通过 Google 重新登录]         │
 │  [通过邮箱验证码登录]           │
 └─────────────────────────────────┘
 ```
 
-**处理流程**：
+**处理流程**:
 1. 清除当前会话（内存中的私钥）
 2. 清除本地的 PIN_Hash
 3. 重新走 OAuth/OTP 登录流程
 4. 按照"新设备登录"流程设置新 PIN
 
-**关键点**：
+**关键点**:
 - 忘记 PIN **不会导致资产丢失**
 - 实质是"清除本地 PIN → 重新验证身份 → 重新设置 PIN"
 - 相当于把当前设备当作"新设备"处理
 
 ---
 
-## 5. 安全性分析
+## 4.5 用户操作流程图
+
+本节详细描述了不同场景下的完整用户操作流程，包括登录和注册时遇到的各种账号状态。
+
+### 4.5.1 用户登录 - Google OAuth
+
+> **⚠️ 注意**：Google OAuth 登录和邮箱 OTP 登录的核心验证流程相似，主要区别在于身份验证方式（OAuth vs OTP）和后续的 PIN 处理逻辑。两个流程图保持独立完整，方便单独查看。
+
+```mermaid
+flowchart TD
+    Start(["用户点击 Google 登录"]) --> OAuth["打开 Google OAuth 授权页面<br/>(prompt=select_account)"]
+    OAuth --> GooglePage["Google 页面显示:<br/>选择账号 + 点击'继续'"]
+    GooglePage --> Authorize{"用户是否确认?"}
+    Authorize -->|取消| End1(["显示'登录已取消'并停留在登录页"])
+    Authorize -->|点击继续| GetEmail["获取 Google Email"]
+    
+    GetEmail --> CheckUser{"后端检查用户是否存在"}
+    
+    CheckUser -->|不存在| Case3["Case 3: 账号未注册"]
+    Case3 --> ShowPrompt["显示'未找到账户'提示"]
+    ShowPrompt --> UserChoice{"用户选择"}
+    UserChoice -->|退出登录| End2(["返回登录页"])
+    UserChoice -->|立即创建| ToRegister["跳转到注册流程创建钱包"]
+    ToRegister --> SetupPIN1["设置 PIN 码"]
+    SetupPIN1 --> Dashboard1(["进入 Dashboard"])
+    
+    CheckUser -->|存在| CheckGoogleSub{"检查是否有 google_sub"}
+    
+    CheckGoogleSub -->|没有google_sub| Case1["Case 1: 仅通过邮箱注册<br/>未绑定 Google"]
+    Case1 --> AutoBind["自动绑定 google_sub"]
+    AutoBind --> ShowBindMsg["提示:'已自动绑定 Google 账号<br/>下次可快速登录'"]
+    ShowBindMsg --> Dashboard2
+    
+    CheckGoogleSub -->|有google_sub| Case2["Case 2: 已通过 Google 注册"]
+    Case2 --> Dashboard2(["直接进入 Dashboard"])
+```
+
+
+### 4.5.2 用户登录 - 邮箱 OTP
+
+> **⚠️ 注意**：邮箱 OTP 登录和 Google OAuth 登录的核心流程相似（用户检查、设备 PIN 判断），主要区别在于身份验证方式（OTP vs OAuth）。两个流程图保持独立完整，方便单独查看。
+
+```mermaid
+flowchart TD
+    Start(["用户点击邮箱登录"]) --> InputEmail["输入邮箱地址"]
+    InputEmail --> RequestOTP["点击'发送验证码'"]
+    RequestOTP --> SendOTP["后端生成并发送 OTP"]
+    SendOTP --> InputOTP["用户输入 OTP"]
+    InputOTP --> VerifyOTP{"验证 OTP"}
+    
+    VerifyOTP -->|错误| Error["显示'验证码错误'"]
+    Error --> InputOTP
+    
+    VerifyOTP -->|正确| CheckUser{"后端检查用户是否存在"}
+    
+    CheckUser -->|不存在| Case3["Case 3: 账号未注册"]
+    Case3 --> ShowPrompt["显示'未找到账户'提示"]
+    ShowPrompt --> UserChoice{"用户选择"}
+    UserChoice -->|取消| End1(["返回登录页"])
+    UserChoice -->|立即创建| ToRegister["跳转到注册流程创建钱包"]
+    ToRegister --> SetupPIN1["设置 PIN 码"]
+    SetupPIN1 --> Dashboard1(["进入 Dashboard"])
+    
+    CheckUser -->|存在| CheckDevice{"检查设备是否有 PIN"}
+    
+    CheckDevice -->|有本地PIN| VerifyPIN["跳转到 PIN 验证页面"]
+    VerifyPIN --> PINCorrect{"PIN 是否正确?"}
+    PINCorrect -->|正确| Dashboard2(["进入 Dashboard"])
+    PINCorrect -->|错误5次| ClearPIN["清除本地 PIN"]
+    ClearPIN --> NewDevice
+    
+    CheckDevice -->|无本地PIN| NewDevice["识别为新设备"]
+    NewDevice --> ShowWelcome["显示欢迎页面:<br/>'检测到你已有钱包'"]
+    ShowWelcome --> SetupNewPIN["为此设备设置新 PIN"]
+    SetupNewPIN --> Dashboard3(["进入 Dashboard"])
+```
+
+### 4.5.3 用户注册 - Google OAuth
+
+> **⚠️ 注意**：Google OAuth 注册和邮箱 OTP 注册的核心流程（用户检查、钱包生成、PIN 设置）完全相同，仅在身份验证方式和上传字段上有差异（`google_sub` vs `user_salt`）。两个流程图保持独立完整，方便单独查看。
+
+```mermaid
+flowchart TD
+    Start(["用户点击 Google 注册"]) --> OAuth["打开 Google OAuth 授权页面"]
+    OAuth --> Authorize{"用户是否授权?"}
+    Authorize -->|取消| End1(["显示'注册已取消'并返回注册页"])
+    Authorize -->|同意| GetEmail["获取 Google Email"]
+    
+    GetEmail --> CheckUser{"后端检查用户是否存在"}
+    
+    CheckUser -->|已存在| AutoLogin["自动登录<br/>(注册转登录)"]
+    AutoLogin --> ShowToast1["Toast提示:<br/>'欢迎回来！检测到您已注册<br/>已为您自动登录'"]
+    ShowToast1 --> CheckDevice{"检查设备<br/>是否有 PIN"}
+    CheckDevice -->|有| Dashboard0(["进入 Dashboard"])
+    CheckDevice -->|无| SetupPIN0["为此设备<br/>设置新 PIN"]
+    SetupPIN0 --> Dashboard0
+    
+    CheckUser -->|不存在| GenerateWallet["前端生成钱包"]
+    GenerateWallet --> Step1["1. 生成随机私钥"]
+    Step1 --> Step2["2. 生成分片 A 和 B<br/>使用 XOR 分割"]
+    Step2 --> Step3["3. 派生加密密钥<br/>K = HKDF(email + user_salt)"]
+    Step3 --> Step4["4. 加密分片 B<br/>Encrypted_B = AES-GCM(分片B, K)"]
+    Step4 --> Upload["上传到后端:<br/>- shard_a<br/>- encrypted_shard_b<br/>- wallet_address<br/>- google_sub"]
+    Upload --> SaveSuccess{"保存成功?"}
+    
+    SaveSuccess -->|失败| ShowError["显示错误提示<br/>(网络/服务器/已存在)"]
+    ShowError --> ErrorChoice{"用户选择"}
+    ErrorChoice -->|重试| Upload
+    ErrorChoice -->|返回| End2(["清除状态<br/>返回注册页"])
+    
+    SaveSuccess -->|成功| ShowWallet["显示钱包地址页面:<br/>'✅ 钱包创建成功!'"]
+    ShowWallet --> UserContinue["用户点击'继续'"]
+    UserContinue --> ShowPINPrompt["强制设置 6 位 PIN 码<br/>(不可跳过)"]
+    ShowPINPrompt --> InputPIN["输入并确认 PIN"]
+    InputPIN --> StorePIN["PIN_Hash 存入本地"]
+    StorePIN --> Dashboard1(["进入 Dashboard"])
+```
+
+### 4.5.4 用户注册 - 邮箱 OTP
+
+> **⚠️ 注意**：邮箱 OTP 注册和 Google OAuth 注册的核心流程（用户检查、钱包生成、PIN 设置）完全相同，仅在身份验证方式（OTP vs OAuth）和上传字段（`user_salt` vs `google_sub`）上有差异。两个流程图保持独立完整，方便单独查看。
+
+```mermaid
+flowchart TD
+    Start(["用户点击邮箱注册"]) --> InputEmail["输入邮箱地址"]
+    InputEmail --> RequestOTP["点击'发送验证码'"]
+    RequestOTP --> SendOTP["后端生成并发送 OTP"]
+    SendOTP --> InputOTP["用户输入 OTP"]
+    InputOTP --> VerifyOTP{"验证 OTP"}
+    
+    VerifyOTP -->|错误| Error["显示'验证码错误'"]
+    Error --> InputOTP
+    
+    VerifyOTP -->|正确| CheckUser{"后端检查用户是否存在"}
+    
+    CheckUser -->|已存在| AutoLogin["自动登录<br/>(注册转登录)"]
+    AutoLogin --> ShowToast["Toast提示:<br/>'欢迎回来！检测到您已注册<br/>已为您自动登录'"]
+    ShowToast --> CheckDevice{"检查设备<br/>是否有 PIN"}
+    CheckDevice -->|有| Dashboard0(["进入 Dashboard"])
+    CheckDevice -->|无| SetupPIN0["为此设备<br/>设置新 PIN"]
+    SetupPIN0 --> Dashboard0
+    
+    CheckUser -->|不存在| GenerateWallet["前端生成钱包"]
+    GenerateWallet --> Step1["1. 生成随机私钥"]
+    Step1 --> Step2["2. 生成分片 A 和 B<br/>使用 XOR 分割"]
+    Step2 --> Step3["3. 派生加密密钥<br/>K = HKDF(email + user_salt)"]
+    Step3 --> Step4["4. 加密分片 B<br/>Encrypted_B = AES-GCM(分片B, K)"]
+    Step4 --> Upload["上传到后端:<br/>- shard_a<br/>- encrypted_shard_b<br/>- wallet_address<br/>- user_salt"]
+    Upload --> SaveSuccess{"保存成功?"}
+    
+    SaveSuccess -->|失败| ShowError["显示错误提示<br/>(网络/服务器/已存在)"]
+    ShowError --> ErrorChoice{"用户选择"}
+    ErrorChoice -->|重试| Upload
+    ErrorChoice -->|返回| End(["清除状态<br/>返回注册页"])
+    
+    SaveSuccess -->|成功| ShowWallet["显示钱包地址页面:<br/>'✅ 钱包创建成功!'"]
+    ShowWallet --> UserContinue["用户点击'继续'"]
+    UserContinue --> ShowPINPrompt["强制设置 6 位 PIN 码<br/>(不可跳过)"]
+    ShowPINPrompt --> InputPIN["输入并确认 PIN"]
+    InputPIN --> StorePIN["PIN_Hash 存入本地"]
+    StorePIN --> Dashboard1(["进入 Dashboard"])
+```
+
+### 4.5.5 流程说明总结
+
+#### 登录场景处理逻辑
+
+**Google 登录**:
+- **OAuth 确认**: 每次登录都需在 Google 页面选择账号并点击"继续"（使用 `prompt=select_account`）
+- **Case 1** (邮箱注册，无Google绑定): 自动绑定 `google_sub` 到账户，提示用户绑定成功，直接进入 Dashboard
+- **Case 2** (Google注册): 直接进入 Dashboard
+- **Case 3** (未注册): 显示"未找到账户"提示，提供创建新账户选项
+- ✅ **无需 PIN 验证**：Google OAuth 确认页已提供足够安全保障
+
+**邮箱 OTP 登录**:
+- **Case 1** (账号已注册): 正常登录流程，检查设备PIN状态
+- **Case 2** (账号未注册): 显示"未找到账户"提示，提供创建新账户选项
+
+#### 注册场景处理逻辑
+
+**Google 注册**:
+- **已存在用户**: 自动转为登录，显示"欢迎回来！已为您自动登录"（不显示错误）
+- **新用户**: 正常注册流程，创建钱包 → 强制设置 PIN → Dashboard
+- **保存失败**: 提供重试/返回选项，附带详细错误提示
+
+**邮箱 OTP 注册**:
+- **已存在用户**: 自动转为登录，显示"欢迎回来！已为您自动登录"（不区分google_sub）
+- **新用户**: 正常注册流程，创建钱包 → 强制设置 PIN → Dashboard
+- **保存失败**: 提供重试/返回选项，附带详细错误提示
+
+#### 关键设计原则
+
+1. **Email 作为唯一标识**: 无论通过哪种方式注册，Email 都是账户的唯一标识
+2. **注册转登录**: 检测到已存在用户时，自动登录而非显示错误（更好的用户体验）
+3. **强制设置 PIN**: 注册时必须设置 PIN，移除"暂不设置"选项（安全性考虑）
+4. **容错处理**: 保存失败时提供重试机制，避免用户重新输入所有信息
+5. **设备 PIN 独立性**: 每个设备独立管理 PIN，新设备需重新设置
+6. **安全与便捷平衡**: Google 登录提供便捷性，邮箱 OTP 提供备用方案
+
+
 
 ### 5.1 三层安全机制
 
