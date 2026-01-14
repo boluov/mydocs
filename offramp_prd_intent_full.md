@@ -1,7 +1,8 @@
 # Offramp 模块产品需求文档 (PRD)
 
-**文档版本**: v1.0  
-**创建日期**: 2026-01-04  
+**文档版本**: v2.0 (Intent 模式)  
+**重要更新**: 采用 **Intent（出金意图）** 模式，参考 Stripe Payment Intent 设计。使用单一 `intentId` 贯穿整个流程，替代之前的 Session + SystemOrder 两层设计  
+**最后更新**: 2026-01-14  
 **目标受众**: 内部开发团队  
 **产品负责人**: Product Manager  
 
@@ -301,25 +302,7 @@ flowchart TB
     style End fill:#f5f5f5
 ```
 
-### 3.2.1 会话（Session）vs 订单（Order）
-
-在 PICA Offramp 系统中，**会话（Session）**和**订单（Order）**是两个不同的概念：
-
-| 对比项         | 会话（Session）                       | 订单（Order）                                     |
-| -------------- | ------------------------------------- | ------------------------------------------------- |
-| **生成时机**   | 调用 `/init` API 时立即生成           | 用户在收银台点击"确认支付"时生成                  |
-| **标识符**     | `sessionId`（如 `SES-20260105-7788`） | `systemOrderNo`（如 `OFF-2024-8821`）             |
-| **状态**       | `SESSION_CREATED` / `SESSION_EXPIRED` | `CREATED` → `INBOUND_PENDING` → ... → `COMPLETED` |
-| **金额确定性** | 可能未确定（允许用户在收银台输入）    | 必须确定（包含币种、网络、金额等完整信息）        |
-| **有效期**     | 默认 30 分钟                          | 从生成到打币完成，通常 30 分钟                    |
-| **用途**       | 保持收银台会话，允许用户选择参数      | 记录完整的交易信息和状态流转                      |
-| **可取消性**   | 自动过期，无需手动取消                | 可以主动取消或因超时失败                          |
-
-**设计原因**：
-- **会话**：允许用户在收银台灵活调整参数（币种、网络、金额），不会产生无效订单
-- **订单**：只有在用户确认支付意图后才生成，确保每个订单都有明确的交易意图
-
-### 3.2.2 两种对接模式对比
+### 3.2.1 两种对接模式对比
 
 | 对比项           | 模式 A: PICA 生成地址           | 模式 B: OTC 下单接口（如DTC）     |
 | ---------------- | ------------------------------- | --------------------------------- |
@@ -330,7 +313,7 @@ flowchart TB
 | **Swap接口调用** | **需要调用OTC Swap接口兑换USD** | **自动转换USD，无需调用Swap接口** |
 | **典型 OTC**     | 其他 OTC 机构                   | DTC PAY 等                        |
 
-### 3.2.3 OTC 机构配置字段
+### 3.2.2 OTC 机构配置字段
 
 为支持两种模式，OTC 机构配置需要增加以下字段：
 
@@ -356,7 +339,7 @@ interface OTCInstitution {
 }
 ```
 
-### 3.2.4 流程步骤详解
+### 3.2.3 流程步骤详解
 
 #### 会话创建阶段（Session Creation）
 
@@ -673,9 +656,9 @@ sequenceDiagram
 
 ### 5.2 核心 API 接口
 
-#### 5.2.1 创建出金会话 (Init Session)
+#### 5.2.1 创建出金意图 (Create Intent)
 
-**Endpoint**: `POST /v1/session/init`
+**Endpoint**: `POST /v1/intents/create`
 
 **请求参数**：
 
@@ -695,7 +678,7 @@ sequenceDiagram
 {
   "code": 200,
   "data": {
-    "sessionId": "SES-20260105-7788",
+    "intentId": "OFI-20260105-7788",
     "merchantOrderNo": "MO-20260105-001",
     "checkoutUrl": "https://checkout.pica.com/v1/payout/xxx?token=xxx",
     "status": "sessionCreated",
@@ -705,7 +688,7 @@ sequenceDiagram
 ```
 
 **重要说明**：
-- **此时还未生成订单**：`/init` 调用只是创建了一个会话（Session），返回 `sessionId`
+- **Intent 已创建**：`/intents/create` 调用创建了一个出金意图（Intent），返回 `intentId`
 - **订单生成时机**：当用户在收银台选择完当项（币种、网络、金额等）并点击“确认支付”时，系统才会生成 `systemOrderNo`（如 `OFF-2024-8821`）
 - **会话有效期**：返回的 `expiresAt` 表明会话有效期（默认 30 分钟），超过该时间未确认支付则会话过期
 - 将 `checkoutUrl` 透传给前端，用于打开收银台
@@ -752,43 +735,6 @@ sequenceDiagram
 3. **阶段 3**：用户点击“确认支付”的一瞬间，才真正生成 `systemOrderNo`，状态变为 `INBOUND_PENDING`，开始倒计时
 
 ---
-#### 5.2.1.2 如何获取 systemOrderNo 并与 sessionId 对应
-
-**问题**：当用户点击"确认支付"后，系统生成了 `systemOrderNo`，法币机构如何知道这个订单号，以及如何与之前的 `sessionId` 对应？
-
-**解决方案**：PICA 提供三种机制，确保法币机构能够可靠地获取订单信息
-
-##### 方式 1: 实时通知（postMessage）- 用于 iframe 模式
-
-收银台在订单创建成功后，立即通过 `postMessage` 通知父页面：
-
-```javascript
-// 收银台发送
-window.parent.postMessage({
-  event: 'PICA_ORDER_CREATED',
-  data: {
-    sessionId: 'SES-20260105-7788',
-    systemOrderNo: 'OFF-2024-8821',
-    merchantOrderNo: 'MO-20260105-001',
-    status: 'CREATED',
-    timestamp: '2026-01-05T10:30:00Z'
-  }
-}, '*');
-```
-
-```javascript
-// 法币机构前端接收
-window.addEventListener('message', (event) => {
-  if (event.data.event === 'PICA_ORDER_CREATED') {
-    const { sessionId, systemOrderNo } = event.data.data;
-    console.log(`Session ${sessionId} 已转换为订单 ${systemOrderNo}`);
-    // 更新本地订单状态
-  }
-});
-```
-
-**优势**：实时性最高，适合 iframe 嵌入模式
-
 ---
 
 ##### 方式 2: Webhook 异步通知（推荐）
@@ -857,7 +803,7 @@ GET /v1/sessions/SES-20260105-7788/order
 {
   "code": 200,
   "data": {
-    "sessionId": "SES-20260105-7788",
+    "intentId": "OFI-20260105-7788",
     "systemOrderNo": "OFF-2024-8821",
     "merchantOrderNo": "MO-20260105-001",
     "status": "INBOUND_PENDING",
@@ -871,7 +817,7 @@ GET /v1/sessions/SES-20260105-7788/order
 {
   "code": 200,
   "data": {
-    "sessionId": "SES-20260105-7788",
+    "intentId": "OFI-20260105-7788",
     "status": "SESSION_CREATED",
     "order": null,
     "message": "Order not created yet"
@@ -926,9 +872,9 @@ CREATE TABLE fiat_institution_orders (
 
 ---
 
-#### 5.2.2 获取订单详情 (Get Order Details)
+#### 5.2.2 查询意图详情 (Get Order Details)
 
-**Endpoint**: `GET /v1/orders/{systemOrderNo}`
+**Endpoint**: `GET /v1/intents/{intentId}`
 
 **响应示例**：
 
@@ -990,9 +936,9 @@ CREATE TABLE fiat_institution_orders (
 
 ---
 
-#### 5.2.3 取消订单 (Cancel Order)
+####5.2.3 取消意图 (Cancel Order)
 
-**Endpoint**: `POST /v1/orders/{systemOrderNo}/cancel`
+**Endpoint**: `POST /v1/intents/{intentId}/cancel`
 
 **请求参数**：
 
@@ -1017,86 +963,287 @@ CREATE TABLE fiat_institution_orders (
 
 ---
 
-### 5.3 Webhook 异步回调
+### 5.3 Webhook 回调通知
 
-PICA 会向 `callbackUrl` 发送 `POST` 请求，法币机构必须实现**幂等性处理**。
+> **设计理念**：采用**订单级回调**设计。在创建 Intent 时传递 `callbackUrl`，所有状态变更通知到这个地址。无需全局 Webhook 配置，更灵活、更简单。
 
-#### 5.3.1 收到数币 (order.cryptoReceived)
+#### 5.3.1 统一事件：intent.status_updated
+
+**所有状态变更**通过同一个事件类型通知，PICA 向创建 Intent 时指定的 `callbackUrl` 发送 `POST` 请求。
+
+**请求格式**：
 
 ```json
+POST {callbackUrl}
+
+Content-Type: application/json
+X-PICA-Signature: sha256=xxx  // 签名，用于验证请求来源
+
 {
-  "event": "order.cryptoReceived",
+  "event": "intent.status_updated",
+  "timestamp": "2026-01-05T10:35:00Z",
   "data": {
-    "systemOrderNo": "GIM-20260105-8899",
+    "intentId": "OFI-20260105-7788",
     "merchantOrderNo": "MO-20260105-001",
-    "status": "confirming",
-    "actualReceived": 1000.00,
-    "asset": "USDT"
+    "status": "payment_received",
+    "previousStatus": "payment_pending",
+    
+    // 根据不同状态，携带相应的详细信息
+    "payment": {
+      "actualAmount": 1000.00,
+      "txHash": "0xabc123...",
+      "asset": "USDT",
+      "network": "TRC20"
+    }
   }
 }
 ```
 
-**业务含义**：链上收币成功，可告知商户"已收币，正在处理换汇"
+**法币机构响应**：
+```json
+HTTP/1.1 200 OK
+
+{
+  "received": true
+}
+```
 
 ---
 
-#### 5.3.2 兑换完成 (order.otcExchanged)
+#### 5.3.2 关键状态的 Webhook 示例
+
+##### intent_confirmed - 用户确认支付
 
 ```json
 {
-  "event": "order.otcExchanged",
+  "event": "intent.status_updated",
+  "timestamp": "2026-01-05T10:31:00Z",
   "data": {
-    "otcId": "FLASH_OTC",
-    "exchangeRate": 0.995,
-    "fiatAmount": 995.00,
-    "fiatCurrency": "USD"
+    "intentId": "OFI-20260105-7788",
+    "status": "intent_confirmed",
+    "previousStatus": "intent_created",
+    "amount": 1000,
+    "asset": "USDT",
+    "network": "TRC20"
   }
 }
 ```
+
+**业务含义**：用户已确认支付，参数已确定（币种、网络、金额）
 
 ---
 
-#### 5.3.3 USD就绪通知 (order.usdReady)
+##### payment_pending - 充币地址已生成
 
 ```json
 {
-  "event": "order.usdReady",
+  "event": "intent.status_updated",
+  "timestamp": "2026-01-05T10:32:00Z",
   "data": {
-    "systemOrderNo": "GIM-20260105-8899",
-    "merchantOrderNo": "MO-20260105-001",
-    "status": "usdReady",
-    "otcId": "FLASH_OTC",
-    "exchangeRate": 0.995,
-    "usdAmount": 995.00,
-    "currency": "USD",
-    "readyTime": "2026-01-05T11:00:00Z"
+    "intentId": "OFI-20260105-7788",
+    "status": "payment_pending",
+    "previousStatus": "intent_confirmed",
+    "payment": {
+      "depositAddress": "TXabc123...",
+      "expectedAmount": 1030.93,
+      "expiresAt": "2026-01-05T11:02:00Z"
+    }
   }
 }
 ```
 
-**业务含义**：OTC已完成兑换，USD已到账OTC账户，**请法币机构安排批量提现**
-- 法币机构可以选择立即提现或批量提现以节省手续费
-- 此时订单状态为 `USD_READY`，等待法币机构执行提现操作
+**业务含义**：充币地址已生成，等待用户打币（30分钟有效期）
 
 ---
 
-#### 5.3.4 异常挂起 (order.exception)
+##### payment_received - 已收到打币
 
 ```json
 {
-  "event": "order.exception",
+  "event": "intent.status_updated",
+  "timestamp": "2026-01-05T10:45:00Z",
   "data": {
-    "exceptionType": "amountMismatch",
-    "expectedAmount": 1000.00,
-    "actualReceived": 995.00,
-    "status": "exception"
+    "intentId": "OFI-20260105-7788",
+    "status": "payment_received",
+    "previousStatus": "payment_pending",
+    "payment": {
+      "actualAmount": 1000.00,
+      "txHash": "0xabc123...",
+      "confirmations": 12
+    }
   }
 }
 ```
 
-**业务含义**：实收与下单金额不符时触发
+**业务含义**：链上确认收到打币，可告知商户"已收币，正在处理兑换"
+
+---
+
+##### exchange_completed - USD 已就绪
+
+```json
+{
+  "event": "intent.status_updated",
+  "timestamp": "2026-01-05T11:00:00Z",
+  "data": {
+    "intentId": "OFI-20260105-7788",
+    "status": "exchange_completed",
+    "previousStatus": "exchange_processing",
+    "exchange": {
+      "rate": 0.995,
+      "fiatAmount": 995.00,
+      "fiatCurrency": "USD",
+      "exchangedAt": "2026-01-05T11:00:00Z"
+    }
+  }
+}
+```
+
+**业务含义**：OTC 已完成兑换，USD 已到账 OTC 账户，**请法币机构安排批量提现**
+
+---
+
+##### succeeded - 订单完成
+
+```json
+{
+  "event": "intent.status_updated",
+  "timestamp": "2026-01-05T11:15:00Z",
+  "data": {
+    "intentId": "OFI-20260105-7788",
+    "status": "succeeded",
+    "previousStatus": "exchange_completed",
+    "settlement": {
+      "grossAmount": 995.00,
+      "fee": 5.00,
+      "netAmount": 990.00,
+      "settledAt": "2026-01-05T11:15:00Z"
+    }
+  }
+}
+```
+
+**业务含义**：法币机构已完成提现，订单最终完成
+
+---
+
+##### requires_action - 需要人工处理
+
+```json
+{
+  "event": "intent.status_updated",
+  "timestamp": "2026-01-05T10:50:00Z",
+  "data": {
+    "intentId": "OFI-20260105-7788",
+    "status": "requires_action",
+    "previousStatus": "payment_received",
+    "issue": {
+      "type": "amount_mismatch",
+      "expectedAmount": 1000.00,
+      "actualAmount": 995.00,
+      "description": "实收金额少于预期，需人工确认是否接受"
+    }
+  }
+}
+```
+
+**业务含义**：
 - **多付**：系统挂起，法币机构通过管理后台选择线下退款
 - **少付**：系统挂起，法币机构可在管理后台点击"接受实收"抹平差额继续流程
+
+---
+
+#### 5.3.3 Webhook 实现要点
+
+**法币机构后端实现示例**：
+
+```javascript
+const crypto = require('crypto');
+
+app.post('/pica/webhook', (req, res) => {
+  // 1. 验证签名（推荐）
+  const signature = req.headers['x-pica-signature'];
+  const isValid = verifySignature(req.body, signature, process.env.PICA_WEBHOOK_SECRET);
+  if (!isValid) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+  
+  // 2. 解析事件
+  const { event, data } = req.body;
+  
+  if (event === 'intent.status_updated') {
+    const { intentId, status, previousStatus } = data;
+    
+    // 3. 更新本地订单状态
+    await db.updateOrderByIntentId(intentId, {
+      status,
+      updatedAt: new Date(),
+      ...data
+    });
+    
+    // 4. 根据状态执行业务逻辑
+    switch (status) {
+      case 'payment_received':
+        // 通知商户"已收币"
+        await notifyMerchant(intentId, '您的数字货币已到账，正在处理兑换');
+        break;
+        
+      case 'exchange_completed':
+        // 触发提现流程
+        await triggerWithdrawal(intentId, data.exchange);
+        break;
+        
+      case 'succeeded':
+        // 通知商户"订单完成"
+        await notifyMerchant(intentId, '兑换已完成，法币已到账');
+        break;
+        
+      case 'requires_action':
+        // 通知运营人员处理异常
+        await notifyOps(intentId, data.issue);
+        break;
+    }
+  }
+  
+  // 5. 返回成功响应
+  res.status(200).json({ received: true });
+});
+
+// 签名验证函数
+function verifySignature(payload, signature, secret) {
+  const hmac = crypto.createHmac('sha256', secret);
+  const digest = 'sha256=' + hmac.update(JSON.stringify(payload)).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+}
+```
+
+---
+
+#### 5.3.4 重试机制
+
+如果 Webhook 通知失败（非 200 响应或超时），PICA 将自动重试：
+
+| 重试次数 | 延迟时间  | 说明                   |
+| -------- | --------- | ---------------------- |
+| 第 1 次  | 立即      | 首次通知失败后立即重试 |
+| 第 2 次  | 1 分钟后  |                        |
+| 第 3 次  | 5 分钟后  |                        |
+| 第 4 次  | 15 分钟后 |                        |
+| 第 5 次  | 1 小时后  | 最后一次重试           |
+
+**建议**：法币机构应实现**幂等性处理**，同一 `intentId` + `status` 的通知多次接收应产生相同结果。
+
+---
+
+#### 5.3.5 设计优势
+
+相比全局 Webhook 配置，订单级 `callbackUrl` 的优势：
+
+✅ **更灵活**：每个订单可以有不同的回调地址  
+✅ **更简单**：无需单独的 Webhook 配置管理界面  
+✅ **更解耦**：法币机构可以为不同业务场景设置不同回调  
+✅ **更安全**：回调地址与订单绑定，不易被篡改  
+✅ **符合行业惯例**：Stripe、PayPal 等主流支付平台都采用此设计
 
 ---
 
