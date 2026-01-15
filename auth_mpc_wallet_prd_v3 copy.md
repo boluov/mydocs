@@ -199,6 +199,10 @@ sequenceDiagram
     Frontend->>User: 提示设置 PIN 码
     User->>Frontend: 输入 6 位 PIN
     Frontend->>Frontend: PIN_Hash 存入本地
+    Frontend->>User: 提示创建首个 Merchant
+    User->>Frontend: 输入商户名称（或使用默认值）
+    Frontend->>Backend: 创建 Merchant 记录
+    Backend->>Frontend: 创建成功
     Frontend->>User: 进入 Dashboard
 ```
 
@@ -234,6 +238,10 @@ sequenceDiagram
     Frontend->>User: 提示设置 PIN 码
     User->>Frontend: 输入 6 位 PIN
     Frontend->>Frontend: PIN_Hash 存入本地
+    Frontend->>User: 提示创建首个 Merchant
+    User->>Frontend: 输入商户名称（或使用默认值）
+    Frontend->>Backend: 创建 Merchant 记录
+    Backend->>Frontend: 创建成功
     Frontend->>User: 进入 Dashboard
 ```
 
@@ -245,8 +253,11 @@ sequenceDiagram
 2. **T1**: 后端返回 user_salt
 3. **T2-T6**: 前端生成私钥、分片、加密、上传
 4. **T7**: 前端显示钱包地址 ← **用户第一次看到成果**
-5. **T8**: 提示用户设置 PIN ← **PIN 设置在钱包生成之后**
-6. **T9**: 进入钱包主界面
+5. **T8**: 提示用户设置 PIN ← **PIN 保护整个账户**
+6. **T9**: 提示用户创建 Merchant ← **创建业务实体**
+7. **T10**: 进入钱包主界面
+
+**重要**: PIN 在 Merchant 之前设置，强调 PIN 是账户级别的保护，而非商户级别。
 
 **注册成功页面**：
 ```
@@ -257,6 +268,25 @@ sequenceDiagram
 │  0x742d35Cc6634C0532925a3b844...│
 │                                 │
 │  [复制地址] [继续]              │
+└─────────────────────────────────┘
+```
+
+**Merchant 创建页面**（新增）：
+```
+┌─────────────────────────────────┐
+│  🏢 创建您的首个商户             │
+│                                 │
+│  商户名称：                      │
+│  ┌─────────────────────────┐   │
+│  │ Weiluo Merchant         │   │
+│  └─────────────────────────┘   │
+│                                 │
+│  💡提示：                       │
+│  • 已为您自动生成默认名称        │
+│  • 您可以修改或直接使用           │
+│  • 后续可在Dashboard创建更多商户  │
+│                                 │
+│  [快速创建] [自定义名称后创建]   │
 └─────────────────────────────────┘
 ```
 
@@ -299,13 +329,28 @@ sequenceDiagram
     Frontend->>Frontend: 2. 分片 B = AES-Decrypt(Encrypted_B, K)
     Frontend->>Frontend: 3. 完整私钥 = 分片 A XOR 分片 B
     Frontend->>Frontend: 检测本地存在 PIN_Hash
-    Frontend->>User: 直接进入 Dashboard<br/>（无需输入 PIN）
+    Frontend->>Backend: 获取用户的 Merchants 列表
+    Backend->>Frontend: 返回 Merchants 列表
+    
+    alt 只有1个Merchant
+        Frontend->>Frontend: 自动选中唯一Merchant
+        Frontend->>User: Toast: "已自动选择商户: {name}"
+        Frontend->>User: 直接进入 Dashboard
+    else 有多个Merchants
+        Frontend->>User: 跳转到 Merchant 选择页面
+        User->>Frontend: 选择某个 Merchant
+        Frontend->>User: 进入 Dashboard
+    else 没有Merchant（异常）
+        Frontend->>User: 提示创建首个 Merchant
+        User->>Frontend: 创建 Merchant
+        Frontend->>User: 进入 Dashboard
+    end
 ```
 
 **用户感知时间**：
 ```
-Google 登录 (0.5s) → 解密恢复 (0.3s) → 进入后台
-总计：约 1 秒
+Google 登录 (0.5s) → 解密恢复 (0.3s) → Merchant选择/自动选中 (0.2s) → 进入后台
+总计：约 1 秒（单merchant）或 需用户选择（多merchant）
 ```
 
 #### 4.2.2 邮箱 OTP 登录
@@ -327,13 +372,28 @@ sequenceDiagram
     Frontend->>Frontend: 2. 分片 B = AES-Decrypt(Encrypted_B, K)
     Frontend->>Frontend: 3. 完整私钥 = 分片 A XOR 分片 B
     Frontend->>Frontend: 检测本地存在 PIN_Hash
-    Frontend->>User: 直接进入 Dashboard<br/>（无需输入 PIN）
+    Frontend->>Backend: 获取用户的 Merchants 列表
+    Backend->>Frontend: 返回 Merchants 列表
+    
+    alt 只有1个Merchant
+        Frontend->>Frontend: 自动选中唯一Merchant
+        Frontend->>User: Toast: "已自动选择商户: {name}"
+        Frontend->>User: 直接进入 Dashboard
+    else 有多个Merchants
+        Frontend->>User: 跳转到 Merchant 选择页面
+        User->>Frontend: 选择某个 Merchant
+        Frontend->>User: 进入 Dashboard
+    else 没有Merchant（异常）
+        Frontend->>User: 提示创建首个 Merchant
+        User->>Frontend: 创建 Merchant
+        Frontend->>User: 进入 Dashboard
+    end
 ```
 
 **用户感知时间**：
 ```
-输入邮箱 (2s) → 等待 OTP (5-10s) → 输入 OTP (3s) → 解密恢复 (0.3s) → 进入后台
-总计：约 10-15 秒
+输入邮箱 (2s) → 等待 OTP (5-10s) → 输入 OTP (3s) → 解密恢复 (0.3s) → Merchant选择/自动选中 (0.2s) → 进入后台
+总计：约 10-15 秒（单merchant）或 需用户选择（多merchant）
 ```
 
 #### 4.2.3 敏感操作时的 PIN 验证
