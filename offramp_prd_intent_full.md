@@ -1,7 +1,7 @@
 # Offramp 模块产品需求文档 (PRD)
 
-**文档版本**: v2.0 (Intent 模式)  
-**重要更新**: 采用 **Intent（出金意图）** 模式，参考 Stripe Payment Intent 设计。使用单一 `intentId` 贯穿整个流程，替代之前的 Session + SystemOrder 两层设计  
+**文档版本**: v2.0 (Order 模式)  
+**重要更新**: 采用 **Order（出金订单）** 模式。使用单一 `orderId` 贯穿整个流程，替代之前的 Session + SystemOrder 两层设计  
 **最后更新**: 2026-01-14  
 **目标受众**: 内部开发团队  
 **产品负责人**: Product Manager  
@@ -471,21 +471,21 @@ erDiagram
 
 ## 状态定义
 
-> **设计理念**：采用 **Intent（出金意图）** 模式，参考 Stripe Payment Intent 设计。Intent 代表一次完整的出金请求，从创建到完成始终使用同一个 `intentId`，通过状态流转表达业务阶段。
+> **设计理念**：采用 **Order（出金订单）** 模式。Order 代表一次完整的出金请求，从创建到完成始终使用同一个 `orderId`，通过状态流转表达业务阶段。
 
-### Intent 状态（Intent States）
+### Order 状态（Order States）
 
 | 状态码                | 状态名称            | 中文名称     | 描述                                         | 可执行操作    |
 | --------------------- | ------------------- | ------------ | -------------------------------------------- | ------------- |
-| `intent_created`      | Intent Created      | 意图已创建   | 调用 /intents/create 成功，返回 checkoutUrl  | 取消          |
-| `intent_confirmed`    | Intent Confirmed    | 意图已确认   | 用户点击"确认支付"，金额和参数已确定         | 取消          |
+| `order_created`       | Order Created       | 订单已创建   | 调用 /orders/create 成功，返回 checkoutUrl   | 取消          |
+| `order_confirmed`     | Order Confirmed     | 订单已确认   | 用户点击"确认支付"，金额和参数已确定         | 取消          |
 | `payment_pending`     | Payment Pending     | 等待支付     | 充值地址已生成，等待链上打币（30分钟有效期） | 取消          |
 | `payment_received`    | Payment Received    | 已收币       | 链上确认收到打币                             | -             |
 | `exchange_processing` | Exchange Processing | 兑换处理中   | 正在进行数币→法币兑换                        | -             |
 | `exchange_completed`  | Exchange Completed  | 兑换完成     | USD 已就绪，等待法币机构提现                 | -             |
 | `succeeded`           | Succeeded           | 已完成       | 法币机构已提现，流程结束                     | -             |
-| `intent_expired`      | Intent Expired      | 意图过期     | 超时未确认支付（30分钟）                     | -             |
-| `intent_canceled`     | Intent Canceled     | 意图取消     | 用户或系统主动取消                           | -             |
+| `order_expired`       | Order Expired       | 订单过期     | 超时未确认支付（30分钟）                     | -             |
+| `order_canceled`      | Order Canceled      | 订单取消     | 用户或系统主动取消                           | -             |
 | `failed`              | Failed              | 失败         | 支付超时或兑换失败                           | -             |
 | `requires_action`     | Requires Action     | 需要人工处理 | 金额不符等异常，需人工介入                   | 标记成功/失败 |
 
@@ -493,13 +493,13 @@ erDiagram
 
 **正常流程**：
 ```
-intent_created → intent_confirmed → payment_pending → payment_received 
+order_created → order_confirmed → payment_pending → payment_received 
   → exchange_processing → exchange_completed → succeeded
 ```
 
 **异常流程**：
-- **用户未确认**：`intent_created` → `intent_expired`（30分钟超时）
-- **用户取消**：`intent_created/intent_confirmed/payment_pending` → `intent_canceled`
+- **用户未确认**：`order_created` → `order_expired`（30分钟超时）
+- **用户取消**：`order_created/order_confirmed/payment_pending` → `order_canceled`
 - **支付超时**：`payment_pending` → `failed`（30分钟无打币）
 - **金额异常**：`payment_received` → `requires_action`（需人工处理）
 
@@ -507,18 +507,18 @@ intent_created → intent_confirmed → payment_pending → payment_received
 
 ```mermaid
 stateDiagram-v2
-    [*] --> intent_created: 调用 /intents/create
+    [*] --> order_created: 调用 /orders/create
     
-    intent_created --> intent_confirmed: 用户确认支付
-    intent_created --> intent_expired: 超时未确认(30分钟)
-    intent_created --> intent_canceled: 用户取消
+    order_created --> order_confirmed: 用户确认支付
+    order_created --> order_expired: 超时未确认(30分钟)
+    order_created --> order_canceled: 用户取消
     
-    intent_confirmed --> payment_pending: 生成充币地址
-    intent_confirmed --> intent_canceled: 用户取消
+    order_confirmed --> payment_pending: 生成充币地址
+    order_confirmed --> order_canceled: 用户取消
     
     payment_pending --> payment_received: 收到打币
     payment_pending --> failed: 支付超时(30分钟)
-    payment_pending --> intent_canceled: 用户取消
+    payment_pending --> order_canceled: 用户取消
     
     payment_received --> exchange_processing: 开始兑换
     payment_received --> requires_action: 金额不符等异常
@@ -531,8 +531,8 @@ stateDiagram-v2
     requires_action --> exchange_processing: 人工处理后继续
     requires_action --> failed: 人工标记失败
     
-    intent_expired --> [*]
-    intent_canceled --> [*]
+    order_expired --> [*]
+    order_canceled --> [*]
     failed --> [*]
     succeeded --> [*]
 ```
@@ -656,9 +656,9 @@ sequenceDiagram
 
 ### 5.2 核心 API 接口
 
-#### 5.2.1 创建出金意图 (Create Intent)
+#### 5.2.1 创建出金订单 (Create Order)
 
-**Endpoint**: `POST /v1/intents/create`
+**Endpoint**: `POST /v1/orders/create`
 
 **请求参数**：
 
@@ -678,7 +678,7 @@ sequenceDiagram
 {
   "code": 200,
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "merchantOrderNo": "MO-20260105-001",
     "checkoutUrl": "https://checkout.pica.com/v1/payout/xxx?token=xxx",
     "status": "sessionCreated",
@@ -688,7 +688,7 @@ sequenceDiagram
 ```
 
 **重要说明**：
-- **Intent 已创建**：`/intents/create` 调用创建了一个出金意图（Intent），返回 `intentId`
+- **Order 已创建**：`/orders/create` 调用创建了一个出金订单（Order），返回 `orderId`
 - **订单生成时机**：当用户在收银台选择完当项（币种、网络、金额等）并点击“确认支付”时，系统才会生成 `systemOrderNo`（如 `OFF-2024-8821`）
 - **会话有效期**：返回的 `expiresAt` 表明会话有效期（默认 30 分钟），超过该时间未确认支付则会话过期
 - 将 `checkoutUrl` 透传给前端，用于打开收银台
@@ -803,7 +803,7 @@ GET /v1/sessions/SES-20260105-7788/order
 {
   "code": 200,
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "systemOrderNo": "OFF-2024-8821",
     "merchantOrderNo": "MO-20260105-001",
     "status": "INBOUND_PENDING",
@@ -817,7 +817,7 @@ GET /v1/sessions/SES-20260105-7788/order
 {
   "code": 200,
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "status": "SESSION_CREATED",
     "order": null,
     "message": "Order not created yet"
@@ -872,9 +872,9 @@ CREATE TABLE fiat_institution_orders (
 
 ---
 
-#### 5.2.2 查询意图详情 (Get Order Details)
+#### 5.2.2 查询订单详情 (Get Order Details)
 
-**Endpoint**: `GET /v1/intents/{intentId}`
+**Endpoint**: `GET /v1/orders/{orderId}`
 
 **响应示例**：
 
@@ -936,9 +936,9 @@ CREATE TABLE fiat_institution_orders (
 
 ---
 
-####5.2.3 取消意图 (Cancel Order)
+####5.2.3 取消订单 (Cancel Order)
 
-**Endpoint**: `POST /v1/intents/{intentId}/cancel`
+**Endpoint**: `POST /v1/orders/{orderId}/cancel`
 
 **请求参数**：
 
@@ -965,11 +965,11 @@ CREATE TABLE fiat_institution_orders (
 
 ### 5.3 Webhook 回调通知
 
-> **设计理念**：采用**订单级回调**设计。在创建 Intent 时传递 `callbackUrl`，所有状态变更通知到这个地址。无需全局 Webhook 配置，更灵活、更简单。
+> **设计理念**：采用**订单级回调**设计。在创建 Order 时传递 `callbackUrl`，所有状态变更通知到这个地址。无需全局 Webhook 配置，更灵活、更简单。
 
-#### 5.3.1 统一事件：intent.status_updated
+#### 5.3.1 统一事件：order.status_updated
 
-**所有状态变更**通过同一个事件类型通知，PICA 向创建 Intent 时指定的 `callbackUrl` 发送 `POST` 请求。
+**所有状态变更**通过同一个事件类型通知，PICA 向创建 Order 时指定的 `callbackUrl` 发送 `POST` 请求。
 
 **请求格式**：
 
@@ -980,10 +980,10 @@ Content-Type: application/json
 X-PICA-Signature: sha256=xxx  // 签名，用于验证请求来源
 
 {
-  "event": "intent.status_updated",
+  "event": "order.status_updated",
   "timestamp": "2026-01-05T10:35:00Z",
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "merchantOrderNo": "MO-20260105-001",
     "status": "payment_received",
     "previousStatus": "payment_pending",
@@ -1012,16 +1012,16 @@ HTTP/1.1 200 OK
 
 #### 5.3.2 关键状态的 Webhook 示例
 
-##### intent_confirmed - 用户确认支付
+##### order_confirmed - 用户确认支付
 
 ```json
 {
-  "event": "intent.status_updated",
+  "event": "order.status_updated",
   "timestamp": "2026-01-05T10:31:00Z",
   "data": {
-    "intentId": "OFI-20260105-7788",
-    "status": "intent_confirmed",
-    "previousStatus": "intent_created",
+    "orderId": "OFI-20260105-7788",
+    "status": "order_confirmed",
+    "previousStatus": "order_created",
     "amount": 1000,
     "asset": "USDT",
     "network": "TRC20"
@@ -1037,12 +1037,12 @@ HTTP/1.1 200 OK
 
 ```json
 {
-  "event": "intent.status_updated",
+  "event": "order.status_updated",
   "timestamp": "2026-01-05T10:32:00Z",
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "status": "payment_pending",
-    "previousStatus": "intent_confirmed",
+    "previousStatus": "order_confirmed",
     "payment": {
       "depositAddress": "TXabc123...",
       "expectedAmount": 1030.93,
@@ -1060,10 +1060,10 @@ HTTP/1.1 200 OK
 
 ```json
 {
-  "event": "intent.status_updated",
+  "event": "order.status_updated",
   "timestamp": "2026-01-05T10:45:00Z",
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "status": "payment_received",
     "previousStatus": "payment_pending",
     "payment": {
@@ -1083,10 +1083,10 @@ HTTP/1.1 200 OK
 
 ```json
 {
-  "event": "intent.status_updated",
+  "event": "order.status_updated",
   "timestamp": "2026-01-05T11:00:00Z",
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "status": "exchange_completed",
     "previousStatus": "exchange_processing",
     "exchange": {
@@ -1107,10 +1107,10 @@ HTTP/1.1 200 OK
 
 ```json
 {
-  "event": "intent.status_updated",
+  "event": "order.status_updated",
   "timestamp": "2026-01-05T11:15:00Z",
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "status": "succeeded",
     "previousStatus": "exchange_completed",
     "settlement": {
@@ -1131,10 +1131,10 @@ HTTP/1.1 200 OK
 
 ```json
 {
-  "event": "intent.status_updated",
+  "event": "order.status_updated",
   "timestamp": "2026-01-05T10:50:00Z",
   "data": {
-    "intentId": "OFI-20260105-7788",
+    "orderId": "OFI-20260105-7788",
     "status": "requires_action",
     "previousStatus": "payment_received",
     "issue": {
@@ -1171,11 +1171,11 @@ app.post('/pica/webhook', (req, res) => {
   // 2. 解析事件
   const { event, data } = req.body;
   
-  if (event === 'intent.status_updated') {
-    const { intentId, status, previousStatus } = data;
+  if (event === 'order.status_updated') {
+    const { orderId, status, previousStatus } = data;
     
     // 3. 更新本地订单状态
-    await db.updateOrderByIntentId(intentId, {
+    await db.updateOrderByOrderId(orderId, {
       status,
       updatedAt: new Date(),
       ...data
@@ -1185,22 +1185,22 @@ app.post('/pica/webhook', (req, res) => {
     switch (status) {
       case 'payment_received':
         // 通知商户"已收币"
-        await notifyMerchant(intentId, '您的数字货币已到账，正在处理兑换');
+        await notifyMerchant(orderId, '您的数字货币已到账，正在处理兑换');
         break;
         
       case 'exchange_completed':
         // 触发提现流程
-        await triggerWithdrawal(intentId, data.exchange);
+        await triggerWithdrawal(orderId, data.exchange);
         break;
         
       case 'succeeded':
         // 通知商户"订单完成"
-        await notifyMerchant(intentId, '兑换已完成，法币已到账');
+        await notifyMerchant(orderId, '兑换已完成，法币已到账');
         break;
         
       case 'requires_action':
         // 通知运营人员处理异常
-        await notifyOps(intentId, data.issue);
+        await notifyOps(orderId, data.issue);
         break;
     }
   }
@@ -1231,7 +1231,7 @@ function verifySignature(payload, signature, secret) {
 | 第 4 次  | 15 分钟后 |                        |
 | 第 5 次  | 1 小时后  | 最后一次重试           |
 
-**建议**：法币机构应实现**幂等性处理**，同一 `intentId` + `status` 的通知多次接收应产生相同结果。
+**建议**：法币机构应实现**幂等性处理**，同一 `orderId` + `status` 的通知多次接收应产生相同结果。
 
 ---
 
