@@ -40,15 +40,15 @@ PICA 为 B 端商户提供两种并行的登录方式：
 - **智能账号绑定**：通过邮箱注册的用户可自动绑定 Google 账号，实现无缝快速登录
 
 **Google OAuth 安全配置**：
-- ✅ 使用 `prompt=select_account` 参数，每次登录都需要用户在 Google 页面确认
-- ✅ 防止静默登录，避免误操作
-- ✅ 用户需主动选择账号并点击"继续"按钮
-- ❌ 不需要额外的 PIN 验证（Google 确认页已提供足够安全保障）
+- Yes 使用 `prompt=select_account` 参数，每次登录都需要用户在 Google 页面确认
+- Yes 防止静默登录，避免误操作
+- Yes 用户需主动选择账号并点击"继续"按钮
+- No 不需要额外的 PIN 验证（Google 确认页已提供足够安全保障）
 
 **Email PIN 快捷登录**：
-- ✅ 老设备使用 PIN 代替 OTP（省成本，快速）
-- ✅ 新设备强制设置 PIN（为下次快捷登录做准备）
-- ✅ 忘记 PIN 可通过 OTP 重置
+- Yes 老设备使用 PIN 代替 OTP（省成本，快速）
+- Yes 新设备强制设置 PIN（为下次快捷登录做准备）
+- Yes 忘记 PIN 可通过 OTP 重置
 
 ### 1.2 Email 作为"身份锚点"
 
@@ -126,15 +126,15 @@ CREATE TABLE users (
 ### 3.1 PIN 的本质定位
 
 **PIN 不是**：
-- ❌ 钱包的"密码"（不参与加密/解密）
-- ❌ 恢复钱包的凭证（恢复依赖 OAuth/OTP）
-- ❌ 钱包的必要组成部分（没有 PIN 钱包仍然存在）
+- No 钱包的"密码"（不参与加密/解密）
+- No 恢复钱包的凭证（恢复依赖 OAuth/OTP）
+- No 钱包的必要组成部分（没有 PIN 钱包仍然存在）
 
 **PIN 是**：
-- ✅ 本地设备的操作授权凭证
-- ✅ 便捷性和安全性的平衡点（避免每次都 OAuth）
-- ✅ 防止设备丢失后的临时保护措施
-- ✅ 可选的快捷验证方式（可以不设置，只是体验差）
+- Yes 本地设备的操作授权凭证
+- Yes 便捷性和安全性的平衡点（避免每次都 OAuth）
+- Yes 防止设备丢失后的临时保护措施
+- Yes 可选的快捷验证方式（可以不设置，只是体验差）
 
 ### 3.2 PIN 的存储方式
 
@@ -153,11 +153,11 @@ PIN_Hash = PBKDF2-HMAC-SHA256(PIN, email, 10000 iterations)
 
 | 场景           | 是否需要 PIN | 说明                         |
 | -------------- | ------------ | ---------------------------- |
-| 登录（Google） | ❌ 不需要     | OAuth 已验证身份             |
+| 登录（Google） | No 不需要     | OAuth 已验证身份             |
 | 登录（邮箱）   | 可选         | OTP 已验证身份，但可要求 PIN |
-| 转账操作       | ✅ 需要       | 敏感操作需要二次确认         |
-| 签名交易       | ✅ 需要       | 敏感操作需要二次确认         |
-| 导出私钥       | ✅ 需要       | 高危操作需要多重验证         |
+| 转账操作       | Yes 需要       | 敏感操作需要二次确认         |
+| 签名交易       | Yes 需要       | 敏感操作需要二次确认         |
+| 导出私钥       | Yes 需要       | 高危操作需要多重验证         |
 | 新设备登录     | 需设置新 PIN | 每个设备独立的 PIN           |
 
 ---
@@ -262,7 +262,7 @@ sequenceDiagram
 **注册成功页面**：
 ```
 ┌─────────────────────────────────┐
-│  ✅ 钱包创建成功!               │
+│  Yes 钱包创建成功!               │
 │                                 │
 │  你的钱包地址：                  │
 │  0x742d35Cc6634C0532925a3b844...│
@@ -530,7 +530,7 @@ sequenceDiagram
 
 ### 4.5.1 用户登录 - Google OAuth
 
-> **⚠️ 注意**：Google OAuth 登录和邮箱 OTP 登录的核心验证流程相似，主要区别在于身份验证方式（OAuth vs OTP）和后续的 PIN 处理逻辑。两个流程图保持独立完整，方便单独查看。
+> **Warning 注意**：Google OAuth 登录和邮箱 OTP 登录的核心验证流程相似，主要区别在于身份验证方式（OAuth vs OTP）和后续的 PIN 处理逻辑。两个流程图保持独立完整，方便单独查看。
 
 ```mermaid
 flowchart TD
@@ -564,7 +564,7 @@ flowchart TD
 
 ### 4.5.2 用户登录 - 邮箱 OTP
 
-> **⚠️ 注意**：邮箱 OTP 登录和 Google OAuth 登录的核心流程相似（用户检查、设备 PIN 判断），主要区别在于身份验证方式（OTP vs OAuth）。两个流程图保持独立完整，方便单独查看。
+> **Warning 注意**：邮箱 OTP 登录和 Google OAuth 登录的核心流程相似（用户检查、设备 PIN 判断），主要区别在于身份验证方式（OTP vs OAuth）。两个流程图保持独立完整，方便单独查看。
 
 ```mermaid
 flowchart TD
@@ -603,7 +603,7 @@ flowchart TD
 
 ### 4.5.3 用户注册 - Google OAuth
 
-> **⚠️ 注意**：Google OAuth 注册和邮箱 OTP 注册的核心流程（用户检查、钱包生成、PIN 设置）完全相同，仅在身份验证方式和上传字段上有差异（`google_sub` vs `user_salt`）。两个流程图保持独立完整，方便单独查看。
+> **Warning 注意**：Google OAuth 注册和邮箱 OTP 注册的核心流程（用户检查、钱包生成、PIN 设置）完全相同，仅在身份验证方式和上传字段上有差异（`google_sub` vs `user_salt`）。两个流程图保持独立完整，方便单独查看。
 
 ```mermaid
 flowchart TD
@@ -634,7 +634,7 @@ flowchart TD
     ErrorChoice -->|重试| Upload
     ErrorChoice -->|返回| End2(["清除状态<br/>返回注册页"])
     
-    SaveSuccess -->|成功| ShowWallet["显示钱包地址页面:<br/>'✅ 钱包创建成功!'"]
+    SaveSuccess -->|成功| ShowWallet["显示钱包地址页面:<br/>'Yes 钱包创建成功!'"]
     ShowWallet --> UserContinue["用户点击'继续'"]
     UserContinue --> ShowPINPrompt["强制设置 6 位 PIN 码<br/>(不可跳过)"]
     ShowPINPrompt --> InputPIN["输入并确认 PIN"]
@@ -644,7 +644,7 @@ flowchart TD
 
 ### 4.5.4 用户注册 - 邮箱 OTP
 
-> **⚠️ 注意**：邮箱 OTP 注册和 Google OAuth 注册的核心流程（用户检查、钱包生成、PIN 设置）完全相同，仅在身份验证方式（OTP vs OAuth）和上传字段（`user_salt` vs `google_sub`）上有差异。两个流程图保持独立完整，方便单独查看。
+> **Warning 注意**：邮箱 OTP 注册和 Google OAuth 注册的核心流程（用户检查、钱包生成、PIN 设置）完全相同，仅在身份验证方式（OTP vs OAuth）和上传字段（`user_salt` vs `google_sub`）上有差异。两个流程图保持独立完整，方便单独查看。
 
 ```mermaid
 flowchart TD
@@ -679,7 +679,7 @@ flowchart TD
     ErrorChoice -->|重试| Upload
     ErrorChoice -->|返回| End(["清除状态<br/>返回注册页"])
     
-    SaveSuccess -->|成功| ShowWallet["显示钱包地址页面:<br/>'✅ 钱包创建成功!'"]
+    SaveSuccess -->|成功| ShowWallet["显示钱包地址页面:<br/>'Yes 钱包创建成功!'"]
     ShowWallet --> UserContinue["用户点击'继续'"]
     UserContinue --> ShowPINPrompt["强制设置 6 位 PIN 码<br/>(不可跳过)"]
     ShowPINPrompt --> InputPIN["输入并确认 PIN"]
@@ -696,7 +696,7 @@ flowchart TD
 - **Case 1** (邮箱注册，无Google绑定): 自动绑定 `google_sub` 到账户，提示用户绑定成功，直接进入 Dashboard
 - **Case 2** (Google注册): 直接进入 Dashboard
 - **Case 3** (未注册): 显示"未找到账户"提示，提供创建新账户选项
-- ✅ **无需 PIN 验证**：Google OAuth 确认页已提供足够安全保障
+- Yes **无需 PIN 验证**：Google OAuth 确认页已提供足够安全保障
 
 **邮箱 OTP 登录**:
 - **Case 1** (账号已注册): 正常登录流程，检查设备PIN状态
@@ -729,20 +729,20 @@ flowchart TD
 
 | 层级   | 机制                      | 作用                         | 是否必需 |
 | ------ | ------------------------- | ---------------------------- | -------- |
-| 第一层 | 身份验证（OAuth/OTP）     | 证明"你是账户的拥有者"       | ✅ 是     |
-| 第二层 | 分片加密（HKDF 派生密钥） | 保护分片 B，防止后端泄露     | ✅ 是     |
-| 第三层 | PIN 码（本地操作授权）    | 快速验证，防止设备丢失后滥用 | ❌ 可选   |
+| 第一层 | 身份验证（OAuth/OTP）     | 证明"你是账户的拥有者"       | Yes 是     |
+| 第二层 | 分片加密（HKDF 派生密钥） | 保护分片 B，防止后端泄露     | Yes 是     |
+| 第三层 | PIN 码（本地操作授权）    | 快速验证，防止设备丢失后滥用 | No 可选   |
 
 ### 5.2 风险点与应对机制
 
 | 风险场景            | 攻击者能拿到什么                 | 系统如何防御                                | 结果             |
 | ------------------- | -------------------------------- | ------------------------------------------- | ---------------- |
-| **Google 账号被盗** | 可登录获取分片                   | 攻击者不知道 email + user_salt 的组合方式   | ⚠️ 可能被盗       |
-| **邮箱被盗**        | 可收到 OTP 验证码                | 同上                                        | ⚠️ 可能被盗       |
-| **后端数据库被黑**  | 分片 A + Encrypted_B + user_salt | 没有 email 无法派生 K（email 来自认证过程） | ❌ 无法解密分片 B |
-| **用户设备被盗**    | 本地 PIN_Hash                    | 没有 OAuth/OTP 无法获取分片                 | ❌ 无法恢复私钥   |
-| **用户忘记 PIN**    | 无                               | 重新 OAuth/OTP 登录，设置新 PIN             | ✅ 资产安全       |
-| **用户换新电脑**    | 无                               | OAuth/OTP 登录恢复，设置新设备 PIN          | ✅ 4 秒恢复       |
+| **Google 账号被盗** | 可登录获取分片                   | 攻击者不知道 email + user_salt 的组合方式   | Warning 可能被盗       |
+| **邮箱被盗**        | 可收到 OTP 验证码                | 同上                                        | Warning 可能被盗       |
+| **后端数据库被黑**  | 分片 A + Encrypted_B + user_salt | 没有 email 无法派生 K（email 来自认证过程） | No 无法解密分片 B |
+| **用户设备被盗**    | 本地 PIN_Hash                    | 没有 OAuth/OTP 无法获取分片                 | No 无法恢复私钥   |
+| **用户忘记 PIN**    | 无                               | 重新 OAuth/OTP 登录，设置新 PIN             | Yes 资产安全       |
+| **用户换新电脑**    | 无                               | OAuth/OTP 登录恢复，设置新设备 PIN          | Yes 4 秒恢复       |
 
 **最严重风险**：
 - 如果攻击者同时控制了用户的 **Google 账号/邮箱**，就能恢复私钥
@@ -757,10 +757,10 @@ flowchart TD
 
 | 传统方案       | PICA 新方案                       | 优势           |
 | -------------- | --------------------------------- | -------------- |
-| 助记词抄在纸上 | 无需抄写，OAuth/OTP 即可恢复      | ✅ 降低丢失风险 |
-| 私钥存在 USB   | 云端加密存储，换设备 4 秒恢复     | ✅ 提高容灾能力 |
-| MetaMask 弹窗  | 内置钱包，无需安装插件            | ✅ 降低操作门槛 |
-| PIN 参与加密   | PIN 与私钥解耦，忘记 PIN 不丢资产 | ✅ 降低丢失风险 |
+| 助记词抄在纸上 | 无需抄写，OAuth/OTP 即可恢复      | Yes 降低丢失风险 |
+| 私钥存在 USB   | 云端加密存储，换设备 4 秒恢复     | Yes 提高容灾能力 |
+| MetaMask 弹窗  | 内置钱包，无需安装插件            | Yes 降低操作门槛 |
+| PIN 参与加密   | PIN 与私钥解耦，忘记 PIN 不丢资产 | Yes 降低丢失风险 |
 
 ---
 
@@ -865,7 +865,7 @@ Response:
 │  ○ 新设备（模拟未存储 PIN）      │
 │  ● 常用设备（模拟已存储 PIN）    │
 │                                 │
-│  [🔄 重置 Demo 数据]            │
+│  [ 重置 Demo 数据]            │
 └─────────────────────────────────┘
 ```
 
